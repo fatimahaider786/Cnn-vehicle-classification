@@ -1,4 +1,5 @@
 import os
+import glob
 import numpy as np
 from PIL import Image
 import streamlit as st
@@ -14,23 +15,23 @@ st.write(
     "Upload an image of a vehicle to classify it into one of the categories."
 )
 
-# 2. Class Names Definition (Dataset ke mutabiq classes)
+# 2. Class Names Definition
 CLASS_NAMES = ["ambulance", "boat", "rickshaw", "scooter", "tractor"]
 
 
-# 3. Model Load Function (Cached for speed)
+# 3. Automatic Model Finder & Loader
 @st.cache_resource
 def load_trained_model():
-  # Apne saved model ke filename ke mutabiq search karega
-  possible_models = [
-      "vehicle_model.h5",
-      "model.h5",
-      "model.keras",
-      "best_model.h5",
-  ]
-  for m in possible_models:
-    if os.path.exists(m):
-      return tf.keras.models.load_model(m)
+  # Pehle root folder aur phir saare subfolders mein .h5 / .keras files dhoondein
+  model_files = glob.glob("**/*.h5", recursive=True) + glob.glob(
+      "**/*.keras", recursive=True
+  )
+
+  if model_files:
+    # Sab se pehli milli hui model file load karein
+    st.write(f"🔍 Loading model file: `{model_files[0]}`")
+    return tf.keras.models.load_model(model_files[0])
+
   return None
 
 
@@ -39,7 +40,7 @@ model = load_trained_model()
 if model is None:
   st.error(
       "❌ Model file (.h5 / .keras) nahi mili! Baraye karam apni model file ko"
-      " main folder mein rakhein."
+      " GitHub repository mein upload karein."
   )
 else:
   # 4. File Uploader
