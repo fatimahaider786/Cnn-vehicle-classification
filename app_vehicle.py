@@ -1,5 +1,4 @@
 import os
-import glob
 import numpy as np
 from PIL import Image
 import streamlit as st
@@ -11,73 +10,95 @@ st.set_page_config(
 )
 
 st.title("🚗 Vehicle Classification App")
-st.write(
-    "Upload an image of a vehicle to classify it into one of the categories."
-)
+st.write("Upload an image of a vehicle to classify it.")
 
-# 2. Class Names Definition
-CLASS_NAMES = ["ambulance", "boat", "rickshaw", "scooter", "tractor"]
+# 2. Complete 20 Classes List (Aapke Dataset ke Mutabiq)
+CLASS_NAMES = [
+    "airplane",
+    "ambulance",
+    "bicycle",
+    "boat",
+    "bus",
+    "car",
+    "fire_truck",
+    "helicopter",
+    "hovercraft",
+    "jet_ski",
+    "kayak",
+    "motorcycle",
+    "rickshaw",
+    "scooter",
+    "skateboard",
+    "tractor",
+    "train",
+    "unicycle",
+    "van",
+    "segway",
+]
 
 
-# 3. Automatic Model Finder & Loader
+# 3. Load TFLite Model
 @st.cache_resource
-def load_trained_model():
-  # Pehle root folder aur phir saare subfolders mein .h5 / .keras files dhoondein
-  model_files = glob.glob("**/*.h5", recursive=True) + glob.glob(
-      "**/*.keras", recursive=True
-  )
+def load_tflite_interpreter():
+  model_path = "vehicle_model.tflite"
+  if not os.path.exists(model_path):
+    # Root ya subfolder mein tflite file search karein
+    for root, dirs, files in os.walk("."):
+      for file in files:
+        if file.endswith(".tflite"):
+          model_path = os.path.join(root, file)
+          break
 
-  if model_files:
-    # Sab se pehli milli hui model file load karein
-    st.write(f"🔍 Loading model file: `{model_files[0]}`")
-    return tf.keras.models.load_model(model_files[0])
-
+  if os.path.exists(model_path):
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    return interpreter
   return None
 
 
-model = load_trained_model()
+interpreter = load_tflite_interpreter()
 
-if model is None:
+if interpreter is None:
   st.error(
-      "❌ Model file (.h5 / .keras) nahi mili! Baraye karam apni model file ko"
-      " GitHub repository mein upload karein."
+      "❌ `vehicle_model.tflite` file nahi mili! Apni TFLite model file ko"
+      " repository mein upload karein."
   )
 else:
+  # Get TFLite input/output details
+  input_details = interpreter.get_input_details()
+  output_details = interpreter.get_output_details()
+
   # 4. File Uploader
   uploaded_file = st.file_uploader(
       "Choose an image...", type=["jpg", "jpeg", "png", "jfif"]
   )
 
   if uploaded_file is not None:
-    # Display Uploaded Image
+    col1, col2 = st.columns(2)
+
     img = Image.open(uploaded_file).convert("RGB")
-    st.image(img, caption="Uploaded Image", use_container_width=True)
+    with col1:
+      st.image(img, caption="Uploaded Image", use_container_width=True)
 
-    # 5. Image Preprocessing (128x128 & Normalization)
-    img_resized = img.resize((128, 128))
-    img_array = np.array(img_resized, dtype=np.float32) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+    with col2:
+      with st.spinner("Classifying..."):
+        # Image Preprocessing (128x128)
+        img_resized = img.resize((128, 128))
+        img_array = np.array(img_resized, dtype=np.float32) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
 
-    # 6. Prediction Logic
-    with st.spinner("Classifying image..."):
-      predictions = model.predict(img_array)
+        # TFLite Inference
+        interpreter.set_tensor(input_details[0]["index"], img_array)
+        interpreter.invoke()
+        predictions = interpreter.get_tensor(output_details[0]["index"])[0]
 
-      if predictions.shape[-1] == 1:
-        # Binary Classification
-        prob = float(predictions[0][0])
-        predicted_idx = 1 if prob >= 0.5 else 0
-        confidence = (prob if prob >= 0.5 else 1 - prob) * 100
-      else:
-        # Multi-class Classification
-        predicted_idx = int(np.argmax(predictions[0]))
-        confidence = float(np.max(predictions[0])) * 100
+        # Get Prediction Index & Confidence
+        predicted_idx = int(np.argmax(predictions))
+        confidence = float(np.max(predictions)) * 100
 
-      # SAFE INDEXING (IndexError Prevention)
-      predicted_idx = min(predicted_idx, len(CLASS_NAMES) - 1)
-      label = CLASS_NAMES[predicted_idx]
+        # Safe Indexing
+        predicted_idx = min(predicted_idx, len(CLASS_NAMES) - 1)
+        label = CLASS_NAMES[predicted_idx]
 
-    # 7. Display Results
-    st.markdown("---")
-    st.subheader("🎯 Prediction Result")
-    st.success(f"**Predicted Class:** {label.upper()}")
-    st.info(f"**Confidence Score:** {confidence:.2f}%")
+        st.success(f"**Predicted Vehicle:** {label.upper()}")
+        st.metric(label="Confidence", value=f"{confidence:.2f}%")
